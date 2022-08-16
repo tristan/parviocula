@@ -1,0 +1,14 @@
+[package]
+name = "asgi_only"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "asgi_only"
+crate-type = ["cdylib"]
+
+[dependencies]
+axum = "0.5.15"
+parviocula = { version = "0.0.1", path = "../..", features = ["extension-module"] }
+pyo3 = { version = "0.16.5", features = ["extension-module"] }

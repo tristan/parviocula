@@ -1,0 +1,26 @@
+[package]
+name = "parviocula"
+version = "0.0.1"
+edition = "2021"
+keywords = ["asgi", "axum"]
+description = "A simple ASGI server aimed at helping the transition from python ASGI applications to an Axum application"
+homepage = "https://github.com/tristan/parviocula"
+repository = "https://github.com/tristan/parviocula"
+authors = ["Tristan King <parviocula@tristan.rs>"]
+license = "MIT"
+readme = "README.md"
+
+[dependencies]
+axum = { version = "0.5.13", features = ["headers"] }
+futures = "0.3.21"
+hyper = "0.14.20"
+percent-encoding = "2.1.0"
+pyo3 = { version = "0.16.5" }
+pyo3-asyncio = { version = "0.16.0", features = ["tokio-runtime"] }
+tokio = { version = "1.20.1", features = ["sync"] }
+tracing = { version = "0.1.36", optional = true }
+
+[features]
+tracing = ["dep:tracing"]
+extension-module = ["pyo3/extension-module"]
+auto-initialize = ["pyo3/auto-initialize"]
