@@ -10,7 +10,7 @@ use pyo3::types::{PyBytes, PyDict, PyLong, PyString};
 use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
-    types::{PyList, PyMapping},
+    types::{PyList, PySequence},
     PyDowncastError,
 };
 use std::{
@@ -246,14 +246,17 @@ impl Handler<AsgiHandler> for AsgiHandler {
                                     let status: u16 = value.extract()?;
 
                                     let headers = if let Some(raw) = dict.get_item("headers") {
-                                        let value: &PyMapping = raw.downcast()?;
+                                        let outer: &PySequence = raw.downcast()?;
                                         Some(
-                                            value
+                                            outer
                                                 .iter()?
                                                 .map(|item| {
-                                                    item.and_then(
-                                                        PyAny::extract::<(Vec<u8>, Vec<u8>)>,
-                                                    )
+                                                    item.and_then(|item| {
+                                                        let seq: &PySequence = item.downcast()?;
+                                                        let header: Vec<u8> = seq.get_item(0)?.extract()?;
+                                                        let value: Vec<u8> = seq.get_item(1)?.extract()?;
+                                                        Ok((header, value))
+                                                    })
                                                 })
                                                 .collect::<PyResult<Vec<_>>>()?,
                                         )

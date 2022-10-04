@@ -1,6 +1,6 @@
 [package]
 name = "parviocula"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 keywords = ["asgi", "axum"]
 description = "A simple ASGI server aimed at helping the transition from python ASGI applications to an Axum application"

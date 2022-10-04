@@ -34,7 +34,7 @@ python demo.py
 
 ...
 
-$ curl http://localhost:3000/post_or_get&name=bob
+$ curl http://localhost:3000/post_or_get?name=bob
 Hello bob, from rust!
 $ curl -H 'Content-Type: application/json' -d '{"name": "bob"}' http://localhost:3000/post_or_get
 Hello bob, from python!

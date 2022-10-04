@@ -41,22 +41,13 @@ async def main():
 
     context = create_server(app, port=3000)
 
-    # because context.start() returns a future and getting a task out of that
-    # doesn't work so well.
-    # NOTE: it is not required to do this if you don't care about shutting down
-    # gracefully, you can simply `await context.start()`.
-    async def start_server():
-        await context.start()
-
-    # start the server in a task, so we don't cancel the future on ctrl+c
-    task = asyncio.create_task(start_server())
     try:
-        # sleep "forever"
-        while True:
-            await asyncio.sleep(60)
+        task = context.start()
+        # shield the task so we can avoid cancelling it on ctrl+c
+        await asyncio.shield(task)
     finally:
-        # ctrl+c will most of the time fall back onto here but it's not perfect
         # trigger a graceful shutdown and wait for everything to close
+        # (ctrl+c will most of the time be captured in this finally but it's not perfect)
         await context.shutdown()
         await task
 

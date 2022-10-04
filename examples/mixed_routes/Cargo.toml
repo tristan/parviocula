@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 axum = "0.5.13"
-parviocula = { version = "0.0.1", path = "../.." }
+parviocula = { version = "0.0.2", path = "../.." }
 pyo3 = { version = "0.16.5", features = ["extension-module"] }
 serde = { version = "1.0.143", features = ["derive"] }
 tokio = { version = "1.20.1", features = ["full"] }

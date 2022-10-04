@@ -47,3 +47,4 @@ Again, feel free to open an Issue with suggestions or a Pull Request with change
  - python typing helpers
  - More tracing support?
  - Websockets?
+ - Figure out the OpenAPI story

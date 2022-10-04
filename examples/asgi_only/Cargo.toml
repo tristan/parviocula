@@ -10,5 +10,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 axum = "0.5.15"
-parviocula = { version = "0.0.1", path = "../..", features = ["extension-module"] }
+parviocula = { version = "0.0.2", path = "../..", features = ["extension-module"] }
 pyo3 = { version = "0.16.5", features = ["extension-module"] }

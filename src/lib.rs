@@ -75,13 +75,17 @@ where
 impl Sender {
     fn __call__<'a>(&'a mut self, py: Python<'a>, args: Py<PyDict>) -> PyResult<&'a PyAny> {
         let fut = self.locals.event_loop(py).call_method0("create_future")?;
-        match self.tx.send(args) {
-            Ok(_) => fut.call_method1("set_result", (py.None(),))?,
-            Err(_) => fut.call_method1(
-                "set_exception",
-                (PyErr::new::<PyRuntimeError, _>("connection closed"),),
-            )?,
-        };
+        if self.tx.is_closed() {
+            fut.call_method1("set_result", (py.None(),))?;
+        } else {
+            match self.tx.send(args) {
+                Ok(_) => fut.call_method1("set_result", (py.None(),))?,
+                Err(_) => fut.call_method1(
+                    "set_exception",
+                    (PyErr::new::<PyRuntimeError, _>("connection closed"),),
+                )?,
+            };
+        }
         Ok(fut)
     }
 }
