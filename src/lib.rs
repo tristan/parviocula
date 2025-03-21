@@ -179,7 +179,7 @@ impl ServerContext {
                     if let Some(resp) = lifespan_sender_rx.recv().await {
                         Python::with_gil(|py| {
                             let dict: &PyDict = resp.into_ref(py);
-                            if let Some(value) = dict.get_item("type") {
+                            if let Ok(Some(value)) = dict.get_item("type") {
                                 let value: &PyString = value.downcast()?;
                                 let value = value.to_str()?;
                                 if value == "lifespan.startup.complete" {

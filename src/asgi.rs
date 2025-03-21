@@ -1,11 +1,11 @@
 use crate::Sender;
 use axum::{
-    body::{boxed, Body, BoxBody, Bytes},
+    body::{to_bytes, Body, Bytes},
     handler::Handler,
-    headers::HeaderName,
-    http::{HeaderValue, Request, StatusCode, Version},
+    http::{HeaderName, HeaderValue, Request, StatusCode, Version},
     response::{IntoResponse, Response},
 };
+
 use pyo3::types::{PyBytes, PyDict, PyLong, PyString};
 use pyo3::{
     exceptions::PyRuntimeError,
@@ -104,14 +104,15 @@ impl HttpReceiver {
         pyo3_asyncio::tokio::future_into_py_with_locals(py, self.locals.clone(), async move {
             let next = rx.lock().await.recv().await;
 
-            if matches!(next, None) || disconnected.load(Ordering::SeqCst) {
+            if next.is_none() || disconnected.load(Ordering::SeqCst) {
                 Python::with_gil(|py| {
                     let scope = PyDict::new(py);
                     scope.set_item("type", "http.disconnect")?;
                     Ok::<_, PyErr>(scope.into())
                 })
             } else if let Some(Some(body)) = next {
-                let bytes = hyper::body::to_bytes(body)
+                const MAX_BODY_SIZE: usize = 4 * 1024 * 1024; // 4MB
+                let bytes = to_bytes(body, MAX_BODY_SIZE)
                     .await
                     .map_err(|_e| PyErr::new::<PyRuntimeError, _>("failed to fetch data"))?;
                 Python::with_gil(|py| {
@@ -133,10 +134,10 @@ impl HttpReceiver {
     }
 }
 
-impl Handler<AsgiHandler> for AsgiHandler {
-    type Future = Pin<Box<dyn Future<Output = Response<BoxBody>> + Send>>;
+impl<S> Handler<AsgiHandler, S> for AsgiHandler {
+    type Future = Pin<Box<dyn Future<Output = Response<Body>> + Send>>;
 
-    fn call(self, req: Request<Body>) -> Self::Future {
+    fn call(self, req: Request<Body>, _state: S) -> Self::Future {
         let app = self.app.clone();
         let locals = self.locals;
         let (http_sender, mut http_sender_rx) = Sender::new(locals.clone());
@@ -231,21 +232,23 @@ impl Handler<AsgiHandler> for AsgiHandler {
                     if let Some(resp) = http_sender_rx.recv().await {
                         let (status, headers) = match Python::with_gil(|py| {
                             let dict: &PyDict = resp.into_ref(py);
-                            if let Some(value) = dict.get_item("type") {
+                            if let Ok(Some(value)) = dict.get_item("type") {
                                 let value: &PyString = value.downcast()?;
                                 let value = value.to_str()?;
                                 if value == "http.response.start" {
                                     let value: &PyLong = dict
                                         .get_item("status")
-                                        .ok_or_else(|| {
-                                            PyErr::new::<PyRuntimeError, _>(
-                                                "Missing status in http.response.start",
-                                            )
+                                        .and_then(|opt| {
+                                            opt.ok_or_else(|| {
+                                                PyErr::new::<PyRuntimeError, _>(
+                                                    "Missing status in http.response.start",
+                                                )
+                                            })
                                         })?
                                         .downcast()?;
                                     let status: u16 = value.extract()?;
 
-                                    let headers = if let Some(raw) = dict.get_item("headers") {
+                                    let headers = if let Ok(Some(raw)) = dict.get_item("headers") {
                                         let outer: &PySequence = raw.downcast()?;
                                         Some(
                                             outer
@@ -253,8 +256,10 @@ impl Handler<AsgiHandler> for AsgiHandler {
                                                 .map(|item| {
                                                     item.and_then(|item| {
                                                         let seq: &PySequence = item.downcast()?;
-                                                        let header: Vec<u8> = seq.get_item(0)?.extract()?;
-                                                        let value: Vec<u8> = seq.get_item(1)?.extract()?;
+                                                        let header: Vec<u8> =
+                                                            seq.get_item(0)?.extract()?;
+                                                        let value: Vec<u8> =
+                                                            seq.get_item(1)?.extract()?;
                                                         Ok((header, value))
                                                     })
                                                 })
@@ -303,16 +308,17 @@ impl Handler<AsgiHandler> for AsgiHandler {
                     while let Some(resp) = http_sender_rx.recv().await {
                         let (bytes, more_body) = match Python::with_gil(|py| {
                             let dict: &PyDict = resp.into_ref(py);
-                            if let Some(value) = dict.get_item("type") {
+                            if let Ok(Some(value)) = dict.get_item("type") {
                                 let value: &PyString = value.downcast()?;
                                 let value = value.to_str()?;
                                 if value == "http.response.body" {
-                                    let more_body = if let Some(raw) = dict.get_item("more_body") {
-                                        raw.extract::<bool>()?
-                                    } else {
-                                        false
-                                    };
-                                    if let Some(raw) = dict.get_item("body") {
+                                    let more_body =
+                                        if let Ok(Some(raw)) = dict.get_item("more_body") {
+                                            raw.extract::<bool>()?
+                                        } else {
+                                            false
+                                        };
+                                    if let Ok(Some(raw)) = dict.get_item("body") {
                                         Ok((raw.extract::<Vec<u8>>()?, more_body))
                                     } else {
                                         Ok((Vec::new(), more_body))
@@ -335,7 +341,7 @@ impl Handler<AsgiHandler> for AsgiHandler {
                         }
                     }
 
-                    let body = boxed(Body::from(Bytes::from(body)));
+                    let body = Body::from(Bytes::from(body));
                     match response.body(body) {
                         Ok(response) => response.into_response(),
                         Err(_e) => {
