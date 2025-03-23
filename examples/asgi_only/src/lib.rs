@@ -10,7 +10,7 @@ use tokio::net::TcpListener;
 #[pyfunction]
 fn create_server(
     app: PyObject,
-    host: Option<&PyUnicode>,
+    host: Option<&Bound<'_, PyUnicode>>,
     port: Option<u16>,
 ) -> PyResult<Py<ServerContext>> {
     let host = match host {

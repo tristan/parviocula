@@ -141,10 +141,10 @@ impl ServerContext {
                 pyo3_async_runtimes::tokio::future_into_py_with_locals(py, locals.clone(), async move {
                     // https://asgi.readthedocs.io/en/latest/specs/lifespan.html
                     let lifespan = Python::with_gil(|py| {
-                        let asgi = PyDict::new(py);
+                        let asgi = PyDict::new_bound(py);
                         asgi.set_item("spec_version", "2.0")?;
                         asgi.set_item("version", "2.0")?;
-                        let scope = PyDict::new(py);
+                        let scope = PyDict::new_bound(py);
                         scope.set_item("type", "lifespan")?;
                         scope.set_item("asgi", asgi)?;
 
@@ -157,7 +157,7 @@ impl ServerContext {
                     })?;
 
                     let lifespan_startup = Python::with_gil(|py| {
-                        let scope = PyDict::new(py);
+                        let scope = PyDict::new_bound(py);
                         scope.set_item("type", "lifespan.startup")?;
                         let scope: Py<PyDict> = scope.into();
                         Ok::<Py<PyDict>, PyErr>(scope)
@@ -178,9 +178,9 @@ impl ServerContext {
 
                     if let Some(resp) = lifespan_sender_rx.recv().await {
                         Python::with_gil(|py| {
-                            let dict: &PyDict = resp.into_ref(py);
+                            let dict: Bound<'_, PyDict> = resp.into_bound(py);
                             if let Ok(Some(value)) = dict.get_item("type") {
-                                let value: &PyString = value.downcast()?;
+                                let value: Bound<'_, PyString> = value.downcast_into()?;
                                 let value = value.to_str()?;
                                 if value == "lifespan.startup.complete" {
                                     return Ok(());
@@ -199,7 +199,7 @@ impl ServerContext {
 
                     // shutdown
                     let lifespan_shutdown = Python::with_gil(|py| {
-                        let scope = PyDict::new(py);
+                        let scope = PyDict::new_bound(py);
                         scope.set_item("type", "lifespan.shutdown")?;
                         let scope: Py<PyDict> = scope.into();
                         Ok::<Py<PyDict>, PyErr>(scope)

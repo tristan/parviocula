@@ -12,6 +12,8 @@ use pyo3::{
     prelude::*,
     types::{PyList, PySequence},
     PyDowncastError,
+    DowncastError,
+    DowncastIntoError,
 };
 use std::{
     future::Future,
@@ -59,6 +61,18 @@ impl From<PyErr> for AsgiError {
 impl From<PyDowncastError<'_>> for AsgiError {
     fn from(e: PyDowncastError<'_>) -> Self {
         AsgiError::PyErr(e.into())
+    }
+}
+
+impl<'a, 'b> From<DowncastError<'a, 'b>> for AsgiError {
+    fn from(_e: DowncastError<'a, 'b>) -> Self {
+        AsgiError::PyErr(PyErr::new::<PyRuntimeError, _>("failed to downcast type"))
+    }
+}
+
+impl<'a> From<DowncastIntoError<'a>> for AsgiError {
+    fn from(_e: DowncastIntoError<'a>) -> Self {
+        AsgiError::PyErr(PyErr::new::<PyRuntimeError, _>("failed to downcast type"))
     }
 }
 
@@ -231,12 +245,12 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
 
                     if let Some(resp) = http_sender_rx.recv().await {
                         let (status, headers) = match Python::with_gil(|py| {
-                            let dict: &PyDict = resp.into_ref(py);
+                            let dict: Bound<'_, PyDict> = resp.into_bound(py);
                             if let Ok(Some(value)) = dict.get_item("type") {
-                                let value: &PyString = value.downcast()?;
+                                let value: Bound<'_, PyString> = value.downcast_into()?;
                                 let value = value.to_str()?;
                                 if value == "http.response.start" {
-                                    let value: &PyLong = dict
+                                    let value: Bound<'_, PyLong> = dict
                                         .get_item("status")
                                         .and_then(|opt| {
                                             opt.ok_or_else(|| {
@@ -245,17 +259,17 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
                                                 )
                                             })
                                         })?
-                                        .downcast()?;
+                                        .downcast_into()?;
                                     let status: u16 = value.extract()?;
 
                                     let headers = if let Ok(Some(raw)) = dict.get_item("headers") {
-                                        let outer: &PySequence = raw.downcast()?;
+                                        let outer: Bound<'_, PySequence> = raw.downcast_into()?;
                                         Some(
                                             outer
                                                 .iter()?
                                                 .map(|item| {
                                                     item.and_then(|item| {
-                                                        let seq: &PySequence = item.downcast()?;
+                                                        let seq: Bound<'_, PySequence> = item.downcast_into()?;
                                                         let header: Vec<u8> =
                                                             seq.get_item(0)?.extract()?;
                                                         let value: Vec<u8> =
@@ -307,9 +321,9 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
                     let mut body = Vec::new();
                     while let Some(resp) = http_sender_rx.recv().await {
                         let (bytes, more_body) = match Python::with_gil(|py| {
-                            let dict: &PyDict = resp.into_ref(py);
+                            let dict: Bound<'_, PyDict> = resp.into_bound(py);
                             if let Ok(Some(value)) = dict.get_item("type") {
-                                let value: &PyString = value.downcast()?;
+                                let value: Bound<'_, PyString> = value.downcast_into().map_err(|_| AsgiError::PyErr(PyErr::new::<PyRuntimeError, _>("failed to downcast type")))?;
                                 let value = value.to_str()?;
                                 if value == "http.response.body" {
                                     let more_body =
