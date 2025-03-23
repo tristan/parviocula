@@ -51,7 +51,7 @@ fn create_server(
 }
 
 #[pymodule]
-fn asgi_only(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(create_server, m)?)?;
+fn asgi_only(_py: Python, m: Bound<PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(create_server, m.clone())?)?;
     Ok(())
 }

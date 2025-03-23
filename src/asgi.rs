@@ -11,7 +11,6 @@ use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
     types::{PyList, PySequence},
-    PyDowncastError,
     DowncastError,
     DowncastIntoError,
 };
@@ -30,12 +29,12 @@ use tokio::sync::{
 
 #[derive(Clone)]
 pub struct AsgiHandler {
-    app: PyObject,
-    locals: pyo3_async_runtimes::TaskLocals,
+    app: Arc<PyObject>,
+    locals: Arc<pyo3_async_runtimes::TaskLocals>,
 }
 
 impl AsgiHandler {
-    pub fn new_with_locals(app: PyObject, locals: pyo3_async_runtimes::TaskLocals) -> AsgiHandler {
+    pub fn new_with_locals(app: Arc<PyObject>, locals: Arc<pyo3_async_runtimes::TaskLocals>) -> AsgiHandler {
         AsgiHandler { app, locals }
     }
 }
@@ -55,12 +54,6 @@ enum AsgiError {
 impl From<PyErr> for AsgiError {
     fn from(e: PyErr) -> Self {
         AsgiError::PyErr(e)
-    }
-}
-
-impl From<PyDowncastError<'_>> for AsgiError {
-    fn from(e: PyDowncastError<'_>) -> Self {
-        AsgiError::PyErr(e.into())
     }
 }
 
@@ -107,7 +100,7 @@ impl Drop for SetTrueOnDrop {
 struct HttpReceiver {
     disconnected: Arc<AtomicBool>,
     rx: Arc<Mutex<UnboundedReceiver<Option<Body>>>>,
-    locals: pyo3_async_runtimes::TaskLocals,
+    locals: Arc<pyo3_async_runtimes::TaskLocals>,
 }
 
 #[pymethods]
@@ -115,7 +108,7 @@ impl HttpReceiver {
     fn __call__<'a>(&'a self, py: Python<'a>) -> PyResult<Bound<'a, PyAny>> {
         let rx = self.rx.clone();
         let disconnected = self.disconnected.clone();
-        pyo3_async_runtimes::tokio::future_into_py_with_locals(py, self.locals.clone(), async move {
+        pyo3_async_runtimes::tokio::future_into_py_with_locals(py, self.locals.clone_ref(py), async move {
             let next = rx.lock().await.recv().await;
 
             if next.is_none() || disconnected.load(Ordering::SeqCst) {
@@ -153,14 +146,13 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
 
     fn call(self, req: Request<Body>, _state: S) -> Self::Future {
         let app = self.app.clone();
-        let locals = self.locals;
-        let (http_sender, mut http_sender_rx) = Sender::new(locals.clone());
+        let (http_sender, mut http_sender_rx) = Sender::new(self.locals.clone());
         let disconnected = Arc::new(AtomicBool::new(false));
         let (receiver_tx, receiver_rx) = mpsc::unbounded_channel();
         let receiver = HttpReceiver {
             rx: Arc::new(Mutex::new(receiver_rx)),
             disconnected: disconnected.clone(),
-            locals: locals.clone(),
+            locals: self.locals.clone(),
         };
         let (req, body): (_, Body) = req.into_parts();
         Box::pin(async move {
@@ -230,7 +222,7 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
                 let args = (scope, receiver, sender);
                 let res = app.call_method1(py, "__call__", args)?;
                 let fut = res.extract(py)?;
-                let coro = pyo3_async_runtimes::into_future_with_locals(&locals, fut)?;
+                let coro = pyo3_async_runtimes::into_future_with_locals(&self.locals, fut)?;
                 Ok::<_, AsgiError>(coro)
             }) {
                 Ok(http_coro) => {

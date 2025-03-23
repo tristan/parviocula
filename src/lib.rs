@@ -47,11 +47,11 @@ impl Receiver {
 #[pyclass]
 pub struct Sender {
     tx: mpsc::UnboundedSender<Py<PyDict>>,
-    locals: pyo3_async_runtimes::TaskLocals,
+    locals: Arc<pyo3_async_runtimes::TaskLocals>,
 }
 
 impl Sender {
-    pub fn new(locals: pyo3_async_runtimes::TaskLocals) -> (Sender, mpsc::UnboundedReceiver<Py<PyDict>>) {
+    pub fn new(locals: Arc<pyo3_async_runtimes::TaskLocals>) -> (Sender, mpsc::UnboundedReceiver<Py<PyDict>>) {
         let (tx, rx) = mpsc::unbounded_channel::<Py<PyDict>>();
         (Sender { tx, locals }, rx)
     }
@@ -133,12 +133,12 @@ impl ServerContext {
             self.wait_shutdown_tx.take(),
         ) {
             (Some(rx), Some(app), Some(server), Some(tx)) => {
-                let locals = pyo3_async_runtimes::TaskLocals::with_running_loop(py)?.copy_context(py)?;
+                let locals = Arc::new(pyo3_async_runtimes::TaskLocals::with_running_loop(py)?.copy_context(py)?);
                 let (lifespan_receiver, lifespan_receiver_tx) = Receiver::new();
                 let (lifespan_sender, mut lifespan_sender_rx) = Sender::new(locals.clone());
                 //let (ready_tx, ready_rx) = oneshot::channel::<()>();
 
-                pyo3_async_runtimes::tokio::future_into_py_with_locals(py, locals.clone(), async move {
+                pyo3_async_runtimes::tokio::future_into_py(py, async move {
                     // https://asgi.readthedocs.io/en/latest/specs/lifespan.html
                     let lifespan = Python::with_gil(|py| {
                         let asgi = PyDict::new_bound(py);
@@ -193,7 +193,7 @@ impl ServerContext {
                     }
 
                     // create asgi service
-                    let asgi_handler = AsgiHandler::new_with_locals(app.clone(), locals.clone());
+                    let asgi_handler = AsgiHandler::new_with_locals(Arc::new(app), locals.clone());
 
                     server.call(asgi_handler, rx).await;
 
