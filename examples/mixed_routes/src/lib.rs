@@ -34,6 +34,7 @@ async fn start(port: u16, shutdown_signal: tokio::sync::oneshot::Receiver<()>, a
 }
 
 #[pyfunction]
+#[pyo3(signature = (app, port=None))]
 fn create_server(app: PyObject, port: Option<u16>) -> PyResult<Py<ServerContext>> {
     let port = port.unwrap_or(3000);
     let ctx = parviocula::create_server_context(

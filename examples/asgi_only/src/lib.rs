@@ -2,15 +2,16 @@ use axum::{serve, Router};
 use parviocula::{AsgiHandler, ServerContext};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyUnicode;
+use pyo3::types::PyString;
 use pyo3::PyResult;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::TcpListener;
 
 #[pyfunction]
+#[pyo3(signature = (app, host=None, port=None))]
 fn create_server(
     app: PyObject,
-    host: Option<&Bound<'_, PyUnicode>>,
+    host: Option<&Bound<'_, PyString>>,
     port: Option<u16>,
 ) -> PyResult<Py<ServerContext>> {
     let host = match host {

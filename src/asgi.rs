@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use pyo3::types::{PyBytes, PyDict, PyLong, PyString};
+use pyo3::types::{PyBytes, PyDict, PyInt, PyString};
 use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
@@ -113,7 +113,7 @@ impl HttpReceiver {
 
             if next.is_none() || disconnected.load(Ordering::SeqCst) {
                 Python::with_gil(|py| {
-                    let scope = PyDict::new_bound(py);
+                    let scope = PyDict::new(py);
                     scope.set_item("type", "http.disconnect")?;
                     Ok::<_, PyErr>(scope.into())
                 })
@@ -123,8 +123,8 @@ impl HttpReceiver {
                     .await
                     .map_err(|_e| PyErr::new::<PyRuntimeError, _>("failed to fetch data"))?;
                 Python::with_gil(|py| {
-                    let bytes = PyBytes::new_bound(py, &bytes[..]);
-                    let scope = PyDict::new_bound(py);
+                    let bytes = PyBytes::new(py, &bytes[..]);
+                    let scope = PyDict::new(py);
                     scope.set_item("type", "http.request")?;
                     scope.set_item("body", bytes)?;
                     let scope: Py<PyDict> = scope.into();
@@ -132,7 +132,7 @@ impl HttpReceiver {
                 })
             } else {
                 Python::with_gil(|py| {
-                    let scope = PyDict::new_bound(py);
+                    let scope = PyDict::new(py);
                     scope.set_item("type", "http.request")?;
                     Ok::<_, PyErr>(scope.into())
                 })
@@ -159,10 +159,10 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
             receiver_tx.send(Some(body)).unwrap();
             let _disconnected = SetTrueOnDrop(disconnected);
             match Python::with_gil(|py| {
-                let asgi = PyDict::new_bound(py);
+                let asgi = PyDict::new(py);
                 asgi.set_item("spec_version", "2.0")?;
                 asgi.set_item("version", "2.0")?;
-                let scope = PyDict::new_bound(py);
+                let scope = PyDict::new(py);
                 scope.set_item("type", "http")?;
                 scope.set_item("asgi", asgi)?;
                 scope.set_item(
@@ -185,22 +185,22 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
                         .decode_utf8()
                         .map_err(|_| AsgiError::InvalidUtf8InPath)?;
                     scope.set_item("path", path)?;
-                    let raw_path_bytes = PyBytes::new_bound(py, path_and_query.path().as_bytes());
+                    let raw_path_bytes = PyBytes::new(py, path_and_query.path().as_bytes());
                     scope.set_item("raw_path", raw_path_bytes)?;
                     if let Some(query) = path_and_query.query() {
-                        let qs_bytes = PyBytes::new_bound(py, query.as_bytes());
+                        let qs_bytes = PyBytes::new(py, query.as_bytes());
                         scope.set_item("query_string", qs_bytes)?;
                     } else {
-                        let qs_bytes = PyBytes::new_bound(py, "".as_bytes());
+                        let qs_bytes = PyBytes::new(py, "".as_bytes());
                         scope.set_item("query_string", qs_bytes)?;
                     }
                 } else {
                     // TODO: is it even possible to get here?
                     // we have to set these to something as they're not optional in the spec
                     scope.set_item("path", "")?;
-                    let raw_path_bytes = PyBytes::new_bound(py, "".as_bytes());
+                    let raw_path_bytes = PyBytes::new(py, "".as_bytes());
                     scope.set_item("raw_path", raw_path_bytes)?;
-                    let qs_bytes = PyBytes::new_bound(py, "".as_bytes());
+                    let qs_bytes = PyBytes::new(py, "".as_bytes());
                     scope.set_item("query_string", qs_bytes)?;
                 }
                 scope.set_item("root_path", "")?;
@@ -209,12 +209,18 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
                     .headers
                     .iter()
                     .map(|(name, value)| {
-                        let name_bytes = PyBytes::new_bound(py, name.as_str().as_bytes());
-                        let value_bytes = PyBytes::new_bound(py, value.as_bytes());
-                        PyList::new_bound(py, [name_bytes, value_bytes])
+                        let name_bytes = PyBytes::new(py, name.as_str().as_bytes());
+                        let value_bytes = PyBytes::new(py, value.as_bytes());
+                        // This unwrap() is safe because PyList::new only fails if there's a Python
+                        // exception during list creation, which won't happen for a simple list of
+                        // two PyBytes objects that were just successfully created
+                        PyList::new(py, [name_bytes, value_bytes]).unwrap()
                     })
                     .collect::<Vec<_>>();
-                let headers = PyList::new_bound(py, headers);
+                // This unwrap() is safe because PyList::new only fails if there's a Python
+                // exception during list creation, which won't happen for a simple list of
+                // PyList objects that were already successfully created above
+                let headers = PyList::new(py, headers).unwrap();
                 scope.set_item("headers", headers)?;
                 // TODO: client/server args
                 let sender = Py::new(py, http_sender)?;
@@ -242,7 +248,7 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
                                 let value: Bound<'_, PyString> = value.downcast_into()?;
                                 let value = value.to_str()?;
                                 if value == "http.response.start" {
-                                    let value: Bound<'_, PyLong> = dict
+                                    let value: Bound<'_, PyInt> = dict
                                         .get_item("status")
                                         .and_then(|opt| {
                                             opt.ok_or_else(|| {
@@ -258,7 +264,7 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
                                         let outer: Bound<'_, PySequence> = raw.downcast_into()?;
                                         Some(
                                             outer
-                                                .iter()?
+                                                .try_iter()?
                                                 .map(|item| {
                                                     item.and_then(|item| {
                                                         let seq: Bound<'_, PySequence> = item.downcast_into()?;

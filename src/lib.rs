@@ -141,10 +141,10 @@ impl ServerContext {
                 pyo3_async_runtimes::tokio::future_into_py(py, async move {
                     // https://asgi.readthedocs.io/en/latest/specs/lifespan.html
                     let lifespan = Python::with_gil(|py| {
-                        let asgi = PyDict::new_bound(py);
+                        let asgi = PyDict::new(py);
                         asgi.set_item("spec_version", "2.0")?;
                         asgi.set_item("version", "2.0")?;
-                        let scope = PyDict::new_bound(py);
+                        let scope = PyDict::new(py);
                         scope.set_item("type", "lifespan")?;
                         scope.set_item("asgi", asgi)?;
 
@@ -157,7 +157,7 @@ impl ServerContext {
                     })?;
 
                     let lifespan_startup = Python::with_gil(|py| {
-                        let scope = PyDict::new_bound(py);
+                        let scope = PyDict::new(py);
                         scope.set_item("type", "lifespan.startup")?;
                         let scope: Py<PyDict> = scope.into();
                         Ok::<Py<PyDict>, PyErr>(scope)
@@ -199,7 +199,7 @@ impl ServerContext {
 
                     // shutdown
                     let lifespan_shutdown = Python::with_gil(|py| {
-                        let scope = PyDict::new_bound(py);
+                        let scope = PyDict::new(py);
                         scope.set_item("type", "lifespan.shutdown")?;
                         let scope: Py<PyDict> = scope.into();
                         Ok::<Py<PyDict>, PyErr>(scope)
