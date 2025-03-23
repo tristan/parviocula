@@ -29,11 +29,11 @@ use tokio::sync::{
 #[derive(Clone)]
 pub struct AsgiHandler {
     app: PyObject,
-    locals: pyo3_asyncio::TaskLocals,
+    locals: pyo3_async_runtimes::TaskLocals,
 }
 
 impl AsgiHandler {
-    pub fn new_with_locals(app: PyObject, locals: pyo3_asyncio::TaskLocals) -> AsgiHandler {
+    pub fn new_with_locals(app: PyObject, locals: pyo3_async_runtimes::TaskLocals) -> AsgiHandler {
         AsgiHandler { app, locals }
     }
 }
@@ -93,20 +93,20 @@ impl Drop for SetTrueOnDrop {
 struct HttpReceiver {
     disconnected: Arc<AtomicBool>,
     rx: Arc<Mutex<UnboundedReceiver<Option<Body>>>>,
-    locals: pyo3_asyncio::TaskLocals,
+    locals: pyo3_async_runtimes::TaskLocals,
 }
 
 #[pymethods]
 impl HttpReceiver {
-    fn __call__<'a>(&'a self, py: Python<'a>) -> PyResult<&'a PyAny> {
+    fn __call__<'a>(&'a self, py: Python<'a>) -> PyResult<Bound<'a, PyAny>> {
         let rx = self.rx.clone();
         let disconnected = self.disconnected.clone();
-        pyo3_asyncio::tokio::future_into_py_with_locals(py, self.locals.clone(), async move {
+        pyo3_async_runtimes::tokio::future_into_py_with_locals(py, self.locals.clone(), async move {
             let next = rx.lock().await.recv().await;
 
             if next.is_none() || disconnected.load(Ordering::SeqCst) {
                 Python::with_gil(|py| {
-                    let scope = PyDict::new(py);
+                    let scope = PyDict::new_bound(py);
                     scope.set_item("type", "http.disconnect")?;
                     Ok::<_, PyErr>(scope.into())
                 })
@@ -116,8 +116,8 @@ impl HttpReceiver {
                     .await
                     .map_err(|_e| PyErr::new::<PyRuntimeError, _>("failed to fetch data"))?;
                 Python::with_gil(|py| {
-                    let bytes = PyBytes::new(py, &bytes[..]);
-                    let scope = PyDict::new(py);
+                    let bytes = PyBytes::new_bound(py, &bytes[..]);
+                    let scope = PyDict::new_bound(py);
                     scope.set_item("type", "http.request")?;
                     scope.set_item("body", bytes)?;
                     let scope: Py<PyDict> = scope.into();
@@ -125,7 +125,7 @@ impl HttpReceiver {
                 })
             } else {
                 Python::with_gil(|py| {
-                    let scope = PyDict::new(py);
+                    let scope = PyDict::new_bound(py);
                     scope.set_item("type", "http.request")?;
                     Ok::<_, PyErr>(scope.into())
                 })
@@ -153,10 +153,10 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
             receiver_tx.send(Some(body)).unwrap();
             let _disconnected = SetTrueOnDrop(disconnected);
             match Python::with_gil(|py| {
-                let asgi = PyDict::new(py);
+                let asgi = PyDict::new_bound(py);
                 asgi.set_item("spec_version", "2.0")?;
                 asgi.set_item("version", "2.0")?;
-                let scope = PyDict::new(py);
+                let scope = PyDict::new_bound(py);
                 scope.set_item("type", "http")?;
                 scope.set_item("asgi", asgi)?;
                 scope.set_item(
@@ -179,22 +179,22 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
                         .decode_utf8()
                         .map_err(|_| AsgiError::InvalidUtf8InPath)?;
                     scope.set_item("path", path)?;
-                    let raw_path_bytes = PyBytes::new(py, path_and_query.path().as_bytes());
+                    let raw_path_bytes = PyBytes::new_bound(py, path_and_query.path().as_bytes());
                     scope.set_item("raw_path", raw_path_bytes)?;
                     if let Some(query) = path_and_query.query() {
-                        let qs_bytes = PyBytes::new(py, query.as_bytes());
+                        let qs_bytes = PyBytes::new_bound(py, query.as_bytes());
                         scope.set_item("query_string", qs_bytes)?;
                     } else {
-                        let qs_bytes = PyBytes::new(py, "".as_bytes());
+                        let qs_bytes = PyBytes::new_bound(py, "".as_bytes());
                         scope.set_item("query_string", qs_bytes)?;
                     }
                 } else {
                     // TODO: is it even possible to get here?
                     // we have to set these to something as they're not optional in the spec
                     scope.set_item("path", "")?;
-                    let raw_path_bytes = PyBytes::new(py, "".as_bytes());
+                    let raw_path_bytes = PyBytes::new_bound(py, "".as_bytes());
                     scope.set_item("raw_path", raw_path_bytes)?;
-                    let qs_bytes = PyBytes::new(py, "".as_bytes());
+                    let qs_bytes = PyBytes::new_bound(py, "".as_bytes());
                     scope.set_item("query_string", qs_bytes)?;
                 }
                 scope.set_item("root_path", "")?;
@@ -203,12 +203,12 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
                     .headers
                     .iter()
                     .map(|(name, value)| {
-                        let name_bytes = PyBytes::new(py, name.as_str().as_bytes());
-                        let value_bytes = PyBytes::new(py, value.as_bytes());
-                        PyList::new(py, [name_bytes, value_bytes])
+                        let name_bytes = PyBytes::new_bound(py, name.as_str().as_bytes());
+                        let value_bytes = PyBytes::new_bound(py, value.as_bytes());
+                        PyList::new_bound(py, [name_bytes, value_bytes])
                     })
                     .collect::<Vec<_>>();
-                let headers = PyList::new(py, headers);
+                let headers = PyList::new_bound(py, headers);
                 scope.set_item("headers", headers)?;
                 // TODO: client/server args
                 let sender = Py::new(py, http_sender)?;
@@ -216,7 +216,7 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
                 let args = (scope, receiver, sender);
                 let res = app.call_method1(py, "__call__", args)?;
                 let fut = res.extract(py)?;
-                let coro = pyo3_asyncio::into_future_with_locals(&locals, fut)?;
+                let coro = pyo3_async_runtimes::into_future_with_locals(&locals, fut)?;
                 Ok::<_, AsgiError>(coro)
             }) {
                 Ok(http_coro) => {
