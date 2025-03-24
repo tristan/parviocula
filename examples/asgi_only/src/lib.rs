@@ -32,7 +32,7 @@ fn create_server(
             let listener = match TcpListener::bind(addr).await {
                 Ok(listener) => listener,
                 Err(err) => {
-                    eprintln!("Failed to bind to address: {}", err);
+                    eprintln!("Failed to bind to address: {err}");
                     return;
                 }
             };
@@ -52,7 +52,7 @@ fn create_server(
 }
 
 #[pymodule]
-fn asgi_only(_py: Python, m: Bound<PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(create_server, m.clone())?)?;
+fn asgi_only(m: &Bound<PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(create_server, m)?)?;
     Ok(())
 }

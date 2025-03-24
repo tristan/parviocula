@@ -47,7 +47,7 @@ fn create_server(app: PyObject, port: Option<u16>) -> PyResult<Py<ServerContext>
 }
 
 #[pymodule]
-fn mixed_routes(_py: Python, m: Bound<PyModule>) -> PyResult<()> {
+fn mixed_routes(m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(create_server, m.clone())?)?;
     Ok(())
 }
