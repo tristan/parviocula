@@ -11,8 +11,7 @@ use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
     types::{PyList, PySequence},
-    DowncastError,
-    DowncastIntoError,
+    DowncastError, DowncastIntoError,
 };
 use std::{
     future::Future,
@@ -34,7 +33,10 @@ pub struct AsgiHandler {
 }
 
 impl AsgiHandler {
-    pub fn new_with_locals(app: Arc<PyObject>, locals: Arc<pyo3_async_runtimes::TaskLocals>) -> AsgiHandler {
+    pub fn new_with_locals(
+        app: Arc<PyObject>,
+        locals: Arc<pyo3_async_runtimes::TaskLocals>,
+    ) -> AsgiHandler {
         AsgiHandler { app, locals }
     }
 }
@@ -108,36 +110,40 @@ impl HttpReceiver {
     fn __call__<'a>(&'a self, py: Python<'a>) -> PyResult<Bound<'a, PyAny>> {
         let rx = self.rx.clone();
         let disconnected = self.disconnected.clone();
-        pyo3_async_runtimes::tokio::future_into_py_with_locals(py, self.locals.clone_ref(py), async move {
-            let next = rx.lock().await.recv().await;
+        pyo3_async_runtimes::tokio::future_into_py_with_locals(
+            py,
+            self.locals.clone_ref(py),
+            async move {
+                let next = rx.lock().await.recv().await;
 
-            if next.is_none() || disconnected.load(Ordering::SeqCst) {
-                Python::with_gil(|py| {
-                    let scope = PyDict::new(py);
-                    scope.set_item("type", "http.disconnect")?;
-                    Ok::<_, PyErr>(scope.into())
-                })
-            } else if let Some(Some(body)) = next {
-                const MAX_BODY_SIZE: usize = 4 * 1024 * 1024; // 4MB
-                let bytes = to_bytes(body, MAX_BODY_SIZE)
-                    .await
-                    .map_err(|_e| PyErr::new::<PyRuntimeError, _>("failed to fetch data"))?;
-                Python::with_gil(|py| {
-                    let bytes = PyBytes::new(py, &bytes[..]);
-                    let scope = PyDict::new(py);
-                    scope.set_item("type", "http.request")?;
-                    scope.set_item("body", bytes)?;
-                    let scope: Py<PyDict> = scope.into();
-                    Ok::<_, PyErr>(scope)
-                })
-            } else {
-                Python::with_gil(|py| {
-                    let scope = PyDict::new(py);
-                    scope.set_item("type", "http.request")?;
-                    Ok::<_, PyErr>(scope.into())
-                })
-            }
-        })
+                if next.is_none() || disconnected.load(Ordering::SeqCst) {
+                    Python::with_gil(|py| {
+                        let scope = PyDict::new(py);
+                        scope.set_item("type", "http.disconnect")?;
+                        Ok::<_, PyErr>(scope.into())
+                    })
+                } else if let Some(Some(body)) = next {
+                    const MAX_BODY_SIZE: usize = 4 * 1024 * 1024; // 4MB
+                    let bytes = to_bytes(body, MAX_BODY_SIZE)
+                        .await
+                        .map_err(|_e| PyErr::new::<PyRuntimeError, _>("failed to fetch data"))?;
+                    Python::with_gil(|py| {
+                        let bytes = PyBytes::new(py, &bytes[..]);
+                        let scope = PyDict::new(py);
+                        scope.set_item("type", "http.request")?;
+                        scope.set_item("body", bytes)?;
+                        let scope: Py<PyDict> = scope.into();
+                        Ok::<_, PyErr>(scope)
+                    })
+                } else {
+                    Python::with_gil(|py| {
+                        let scope = PyDict::new(py);
+                        scope.set_item("type", "http.request")?;
+                        Ok::<_, PyErr>(scope.into())
+                    })
+                }
+            },
+        )
     }
 }
 
@@ -267,7 +273,8 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
                                                 .try_iter()?
                                                 .map(|item| {
                                                     item.and_then(|item| {
-                                                        let seq: Bound<'_, PySequence> = item.downcast_into()?;
+                                                        let seq: Bound<'_, PySequence> =
+                                                            item.downcast_into()?;
                                                         let header: Vec<u8> =
                                                             seq.get_item(0)?.extract()?;
                                                         let value: Vec<u8> =
@@ -321,7 +328,12 @@ impl<S> Handler<AsgiHandler, S> for AsgiHandler {
                         let (bytes, more_body) = match Python::with_gil(|py| {
                             let dict: Bound<'_, PyDict> = resp.into_bound(py);
                             if let Ok(Some(value)) = dict.get_item("type") {
-                                let value: Bound<'_, PyString> = value.downcast_into().map_err(|_| AsgiError::PyErr(PyErr::new::<PyRuntimeError, _>("failed to downcast type")))?;
+                                let value: Bound<'_, PyString> =
+                                    value.downcast_into().map_err(|_| {
+                                        AsgiError::PyErr(PyErr::new::<PyRuntimeError, _>(
+                                            "failed to downcast type",
+                                        ))
+                                    })?;
                                 let value = value.to_str()?;
                                 if value == "http.response.body" {
                                     let more_body =

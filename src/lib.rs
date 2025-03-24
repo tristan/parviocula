@@ -51,7 +51,9 @@ pub struct Sender {
 }
 
 impl Sender {
-    pub fn new(locals: Arc<pyo3_async_runtimes::TaskLocals>) -> (Sender, mpsc::UnboundedReceiver<Py<PyDict>>) {
+    pub fn new(
+        locals: Arc<pyo3_async_runtimes::TaskLocals>,
+    ) -> (Sender, mpsc::UnboundedReceiver<Py<PyDict>>) {
         let (tx, rx) = mpsc::unbounded_channel::<Py<PyDict>>();
         (Sender { tx, locals }, rx)
     }
@@ -133,7 +135,9 @@ impl ServerContext {
             self.wait_shutdown_tx.take(),
         ) {
             (Some(rx), Some(app), Some(server), Some(tx)) => {
-                let locals = Arc::new(pyo3_async_runtimes::TaskLocals::with_running_loop(py)?.copy_context(py)?);
+                let locals = Arc::new(
+                    pyo3_async_runtimes::TaskLocals::with_running_loop(py)?.copy_context(py)?,
+                );
                 let (lifespan_receiver, lifespan_receiver_tx) = Receiver::new();
                 let (lifespan_sender, mut lifespan_sender_rx) = Sender::new(locals.clone());
                 //let (ready_tx, ready_rx) = oneshot::channel::<()>();
