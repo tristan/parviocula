@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use axum::{extract::Query, handler::Handler, response::IntoResponse, routing::get, Router};
+use axum::{extract::Query, response::IntoResponse, routing::get, Router};
 use parviocula::{AsgiHandler, ServerContext};
 use pyo3::prelude::*;
 use serde::Deserialize;
@@ -17,10 +17,11 @@ async fn get_root(Query(RootQuery { name }): Query<RootQuery>) -> impl IntoRespo
 async fn start(port: u16, shutdown_signal: tokio::sync::oneshot::Receiver<()>, asgi: AsgiHandler) {
     let app = Router::new()
         .route("/post_or_get", get(get_root).post(asgi.clone()))
-        .fallback(asgi.into_service());
+        .fallback(asgi);
     let addr = SocketAddr::new([127, 0, 0, 1].into(), port);
-    if let Err(err) = axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+
+    if let Err(err) = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             if let Err(err) = shutdown_signal.await {
                 eprintln!("failed to send shutdown signal: {err}");
@@ -33,6 +34,7 @@ async fn start(port: u16, shutdown_signal: tokio::sync::oneshot::Receiver<()>, a
 }
 
 #[pyfunction]
+#[pyo3(signature = (app, port=None))]
 fn create_server(app: PyObject, port: Option<u16>) -> PyResult<Py<ServerContext>> {
     let port = port.unwrap_or(3000);
     let ctx = parviocula::create_server_context(
@@ -45,7 +47,7 @@ fn create_server(app: PyObject, port: Option<u16>) -> PyResult<Py<ServerContext>
 }
 
 #[pymodule]
-fn mixed_routes(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(create_server, m)?)?;
+fn mixed_routes(m: &Bound<PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(create_server, m.clone())?)?;
     Ok(())
 }

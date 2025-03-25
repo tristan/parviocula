@@ -30,9 +30,9 @@ impl Receiver {
 
 #[pymethods]
 impl Receiver {
-    fn __call__<'a>(&'a mut self, py: Python<'a>) -> PyResult<&'a PyAny> {
+    fn __call__<'a>(&'a mut self, py: Python<'a>) -> PyResult<Bound<'a, PyAny>> {
         let rx = self.rx.clone();
-        pyo3_asyncio::tokio::future_into_py(py, async move {
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let next = rx
                 .lock()
                 .await
@@ -47,11 +47,13 @@ impl Receiver {
 #[pyclass]
 pub struct Sender {
     tx: mpsc::UnboundedSender<Py<PyDict>>,
-    locals: pyo3_asyncio::TaskLocals,
+    locals: Arc<pyo3_async_runtimes::TaskLocals>,
 }
 
 impl Sender {
-    pub fn new(locals: pyo3_asyncio::TaskLocals) -> (Sender, mpsc::UnboundedReceiver<Py<PyDict>>) {
+    pub fn new(
+        locals: Arc<pyo3_async_runtimes::TaskLocals>,
+    ) -> (Sender, mpsc::UnboundedReceiver<Py<PyDict>>) {
         let (tx, rx) = mpsc::unbounded_channel::<Py<PyDict>>();
         (Sender { tx, locals }, rx)
     }
@@ -73,7 +75,7 @@ where
 
 #[pymethods]
 impl Sender {
-    fn __call__<'a>(&'a mut self, py: Python<'a>, args: Py<PyDict>) -> PyResult<&'a PyAny> {
+    fn __call__<'a>(&'a mut self, py: Python<'a>, args: Py<PyDict>) -> PyResult<Bound<'a, PyAny>> {
         let fut = self.locals.event_loop(py).call_method0("create_future")?;
         if self.tx.is_closed() {
             fut.call_method1("set_result", (py.None(),))?;
@@ -102,7 +104,7 @@ pub struct ServerContext {
 
 #[pymethods]
 impl ServerContext {
-    fn shutdown<'a>(&'a mut self, py: Python<'a>) -> PyResult<&'a PyAny> {
+    fn shutdown<'a>(&'a mut self, py: Python<'a>) -> PyResult<Bound<'a, PyAny>> {
         if let (Some(tx), Some(rx)) = (
             self.trigger_shutdown_tx.take(),
             self.wait_shutdown_rx.take(),
@@ -111,7 +113,7 @@ impl ServerContext {
                 #[cfg(feature = "tracing")]
                 tracing::warn!("failed to send shutdown notification: {:?}", _e);
             }
-            pyo3_asyncio::tokio::future_into_py(py, async move {
+            pyo3_async_runtimes::tokio::future_into_py(py, async move {
                 if let Err(_e) = rx.await {
                     #[cfg(feature = "tracing")]
                     tracing::warn!("failed waiting for shutdown: {:?}", _e);
@@ -119,13 +121,13 @@ impl ServerContext {
                 Ok::<_, PyErr>(Python::with_gil(|py| py.None()))
             })
         } else {
-            pyo3_asyncio::tokio::future_into_py(py, async move {
+            pyo3_async_runtimes::tokio::future_into_py(py, async move {
                 Ok::<_, PyErr>(Python::with_gil(|py| py.None()))
             })
         }
     }
 
-    fn start<'a>(&'a mut self, py: Python<'a>) -> PyResult<&'a PyAny> {
+    fn start<'a>(&'a mut self, py: Python<'a>) -> PyResult<Bound<'a, PyAny>> {
         match (
             self.trigger_shutdown_rx.take(),
             self.app.take(),
@@ -133,12 +135,14 @@ impl ServerContext {
             self.wait_shutdown_tx.take(),
         ) {
             (Some(rx), Some(app), Some(server), Some(tx)) => {
-                let locals = pyo3_asyncio::TaskLocals::with_running_loop(py)?.copy_context(py)?;
+                let locals = Arc::new(
+                    pyo3_async_runtimes::TaskLocals::with_running_loop(py)?.copy_context(py)?,
+                );
                 let (lifespan_receiver, lifespan_receiver_tx) = Receiver::new();
                 let (lifespan_sender, mut lifespan_sender_rx) = Sender::new(locals.clone());
                 //let (ready_tx, ready_rx) = oneshot::channel::<()>();
 
-                pyo3_asyncio::tokio::future_into_py_with_locals(py, locals.clone(), async move {
+                pyo3_async_runtimes::tokio::future_into_py(py, async move {
                     // https://asgi.readthedocs.io/en/latest/specs/lifespan.html
                     let lifespan = Python::with_gil(|py| {
                         let asgi = PyDict::new(py);
@@ -153,7 +157,7 @@ impl ServerContext {
                         let args = (scope, receiver, sender);
                         let res = app.call_method1(py, "__call__", args)?;
                         let fut = res.extract(py)?;
-                        pyo3_asyncio::into_future_with_locals(&locals, fut)
+                        pyo3_async_runtimes::into_future_with_locals(&locals, fut)
                     })?;
 
                     let lifespan_startup = Python::with_gil(|py| {
@@ -178,9 +182,9 @@ impl ServerContext {
 
                     if let Some(resp) = lifespan_sender_rx.recv().await {
                         Python::with_gil(|py| {
-                            let dict: &PyDict = resp.into_ref(py);
-                            if let Some(value) = dict.get_item("type") {
-                                let value: &PyString = value.downcast()?;
+                            let dict: Bound<'_, PyDict> = resp.into_bound(py);
+                            if let Ok(Some(value)) = dict.get_item("type") {
+                                let value: Bound<'_, PyString> = value.downcast_into()?;
                                 let value = value.to_str()?;
                                 if value == "lifespan.startup.complete" {
                                     return Ok(());
@@ -193,7 +197,7 @@ impl ServerContext {
                     }
 
                     // create asgi service
-                    let asgi_handler = AsgiHandler::new_with_locals(app.clone(), locals.clone());
+                    let asgi_handler = AsgiHandler::new_with_locals(Arc::new(app), locals.clone());
 
                     server.call(asgi_handler, rx).await;
 
